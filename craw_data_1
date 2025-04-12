@@ -1,0 +1,103 @@
+import os
+import time
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import NoSuchElementException
+
+# ===== 1. Cấu hình thư mục tải & Chrome =====
+download_folder = os.path.abspath("downloads")
+os.makedirs(download_folder, exist_ok=True)
+
+chrome_options = Options()
+chrome_options.add_experimental_option("prefs", {
+    "download.default_directory": download_folder,
+    "plugins.always_open_pdf_externally": True,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True
+})
+
+driver = webdriver.Chrome(options=chrome_options)
+
+# ===== 2. Truy cập trang web =====
+url = "https://nghiepvuy.medinet.gov.vn/ket-qua-dich-vu-cong-vb4539.aspx"
+driver.get(url)
+time.sleep(3)
+
+file_data = []
+current_page = 1
+target_end_page = 63
+
+# ===== 3. Duyệt từng trang =====
+while current_page <= target_end_page:
+    print(f"\n📄 Đang xử lý trang {current_page}...")
+
+    try:
+        table = driver.find_element(By.ID, "plcall_Documents1_grvmn")
+        links = table.find_elements(By.TAG_NAME, "a")
+        print(f"🔗 Tìm thấy {len(links)} link trên trang {current_page}")
+
+        for link in links:
+            file_url = link.get_attribute("href")
+            if file_url and file_url.lower().endswith(".pdf"):
+                file_name = file_url.split("/")[-1]
+                file_path = os.path.join(download_folder, file_name)
+
+                if not os.path.exists(file_path):
+                    print(f"⬇️ Đang tải: {file_name}")
+                    try:
+                        link.click()
+                        time.sleep(4)  # Đợi Chrome tải PDF
+                    except Exception as e:
+                        print(f"❌ Lỗi khi click link: {e}")
+                        continue
+                else:
+                    print(f"📂 Đã tồn tại: {file_name}")
+
+                file_data.append({
+                    "Trang": current_page,
+                    "Tên file": file_name,
+                    "Đường dẫn": file_url,
+                    "Vị trí lưu": file_path
+                })
+
+    except NoSuchElementException:
+        print("❌ Không tìm thấy bảng dữ liệu.")
+        break
+
+    # ===== 4. Chuyển trang =====
+    try:
+        pagination_links = driver.find_elements(By.TAG_NAME, "a")
+        moved = False
+
+        for btn in pagination_links:
+            if btn.text.strip() == str(current_page + 1):
+                print(f"➡️ Chuyển sang trang {current_page + 1}")
+                btn.click()
+                current_page += 1
+                time.sleep(3)
+                moved = True
+                break
+
+        if not moved:
+            ellipsis_buttons = [btn for btn in pagination_links if btn.text.strip() == "..."]
+            if ellipsis_buttons:
+                print("🔁 Mở cụm phân trang kế tiếp (dấu ... cuối)")
+                ellipsis_buttons[-1].click()
+                time.sleep(2)
+            else:
+                print("✅ Đã duyệt hết các trang.")
+                break
+
+    except Exception as e:
+        print(f"❌ Lỗi khi chuyển trang: {e}")
+        break
+
+# ===== 5. Ghi file CSV =====
+df = pd.DataFrame(file_data)
+df.to_csv("file_links.csv", index=False, encoding='utf-8-sig')
+
+driver.quit()
+print("\n🎉 HOÀN TẤT! Đã tải toàn bộ PDF và lưu thông tin vào file_links.csv")
